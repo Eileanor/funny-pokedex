@@ -35,3 +35,4 @@ build/
 ### Other resources ###
 *.txt
 .DS_Store
+*example.json
