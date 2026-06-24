@@ -36,3 +36,4 @@ build/
 *.txt
 .DS_Store
 *example.json
+claude-*.md

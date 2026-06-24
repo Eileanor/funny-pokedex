@@ -6,7 +6,7 @@ heavy lifting:
 
 - [**PokéAPI**](https://pokeapi.co/) — standard description, habitat and legendary status
   (from the `pokemon-species` resource).
-- [**FunTranslations**](https://funtranslations.mercxry.me/) — Yoda / Shakespeare "fun"
+- [**FunTranslations**](https://api.funtranslations.mercxry.me/v1/) — Yoda / Shakespeare "fun"
   translations of the description.
 
 Both upstreams are **rate-limited** (FunTranslations especially — a handful of calls per

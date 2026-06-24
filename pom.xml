@@ -6,39 +6,82 @@
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
 		<version>4.1.0</version>
-		<relativePath/> <!-- lookup parent from repository -->
+		<relativePath/>
 	</parent>
 	<groupId>com.eileanor</groupId>
-	<artifactId>funny-pokedex</artifactId>
+	<artifactId>pokedex</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name/>
-	<description/>
-	<url/>
-	<licenses>
-		<license/>
-	</licenses>
-	<developers>
-		<developer/>
-	</developers>
-	<scm>
-		<connection/>
-		<developerConnection/>
-		<tag/>
-		<url/>
-	</scm>
+
 	<properties>
 		<java.version>21</java.version>
+		<!-- Not in Spring Boot 4.1 BOM — verify latest on https://github.com/resilience4j/resilience4j -->
+		<resilience4j.version>2.3.0</resilience4j.version>
+		<!-- Not in Spring Boot 4.1 BOM -->
+		<okhttp.version>4.12.0</okhttp.version>
 	</properties>
+
 	<dependencies>
+		<!-- Web (servlet stack) -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-webclient</artifactId>
+			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
+
+		<!-- WebClient — reactive HTTP client used in the client layer.
+		     Spring Boot keeps the servlet stack even with both webmvc+webflux on the classpath.
+		     WebClient is used with .block() at the service boundary. -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webflux</artifactId>
 		</dependency>
 
+		<!-- Caching abstraction — @EnableCaching + @Cacheable -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-cache</artifactId>
+		</dependency>
+
+		<!-- Local cache backend: Caffeine (in-memory, local profile) -->
+		<dependency>
+			<groupId>com.github.ben-manes.caffeine</groupId>
+			<artifactId>caffeine</artifactId>
+		</dependency>
+
+		<!-- Distributed cache backend: Redis (prod profile) -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
+
+		<!-- Resilience4j — retry and circuit breaker on outbound WebClient calls.
+		     spring-boot-starter-aspectj is required for @Retry / @CircuitBreaker AOP proxies.
+		     Note: in Spring Boot 4.x the starter was renamed from -aop to -aspectj. -->
+		<dependency>
+			<groupId>io.github.resilience4j</groupId>
+			<artifactId>resilience4j-spring-boot3</artifactId>
+			<version>${resilience4j.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-aspectj</artifactId>
+		</dependency>
+
+		<!-- Inbound rate limiting is handled via Resilience4j @RateLimiter (already
+		     included transitively by resilience4j-spring-boot3). This gives a single
+		     library for both inbound and outbound resilience.
+		     NOTE for prod: Resilience4j's AtomicRateLimiter is per-instance (in-memory).
+		     For true cluster-wide rate limiting, replace with a Redis-script-based
+		     distributed rate limiter or Bucket4j backed by LettuceBasedProxyManager
+		     (io.github.bucket4j:bucket4j-redis:<version>) — verify artifact coordinates
+		     at https://github.com/bucket4j/bucket4j before adding. -->
+
+		<!-- Observability — Actuator health/readiness, Micrometer metrics -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+
+		<!-- Dev tooling -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-devtools</artifactId>
@@ -50,14 +93,30 @@
 			<artifactId>lombok</artifactId>
 			<optional>true</optional>
 		</dependency>
+
+		<!-- Test -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-webclient-test</artifactId>
+			<artifactId>spring-boot-starter-webmvc-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!-- OkHttp3 MockWebServer for client layer unit tests (not in Boot BOM) -->
+		<dependency>
+			<groupId>com.squareup.okhttp3</groupId>
+			<artifactId>mockwebserver</artifactId>
+			<version>${okhttp.version}</version>
+			<scope>test</scope>
+		</dependency>
+		<!-- Spring Boot + Testcontainers integration (Boot 4.1 manages Testcontainers 2.x BOM) -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-webflux-test</artifactId>
+			<artifactId>spring-boot-testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<!-- Testcontainers 2.x JUnit Jupiter support — module name changed in 2.x -->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-junit-jupiter</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
@@ -83,9 +142,7 @@
 					<execution>
 						<id>default-compile</id>
 						<phase>compile</phase>
-						<goals>
-							<goal>compile</goal>
-						</goals>
+						<goals><goal>compile</goal></goals>
 						<configuration>
 							<annotationProcessorPaths>
 								<path>
@@ -98,9 +155,7 @@
 					<execution>
 						<id>default-testCompile</id>
 						<phase>test-compile</phase>
-						<goals>
-							<goal>testCompile</goal>
-						</goals>
+						<goals><goal>testCompile</goal></goals>
 						<configuration>
 							<annotationProcessorPaths>
 								<path>
