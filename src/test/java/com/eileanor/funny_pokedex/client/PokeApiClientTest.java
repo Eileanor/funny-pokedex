@@ -6,6 +6,7 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -36,6 +37,7 @@ class PokeApiClientTest {
     }
 
     @Test
+    @DisplayName("fetchSpecies returns correct response for valid species")
     void fetchSpecies_happyPath_deserializesResponse() {
         server.enqueue(new MockResponse()
                 .setResponseCode(200)
@@ -61,6 +63,7 @@ class PokeApiClientTest {
     }
 
     @Test
+    @DisplayName("fetchSpecies throws PokemonNotFoundException for 404 response")
     void fetchSpecies_notFound_throwsPokemonNotFoundException() {
         server.enqueue(new MockResponse().setResponseCode(404));
 
@@ -69,10 +72,20 @@ class PokeApiClientTest {
     }
 
     @Test
+    @DisplayName("fetchSpecies throws WebClientResponseException for 500 response")
     void fetchSpecies_serverError_throwsWebClientResponseException() {
         server.enqueue(new MockResponse().setResponseCode(500));
 
         assertThatThrownBy(() -> client.fetchSpecies("mewtwo"))
                 .isInstanceOf(WebClientResponseException.class);
+    }
+
+    @Test
+    @DisplayName("fetchSpecies throws exception when request fails due to network issues")
+    void fetchSpecies_requestFailure_throwsException() throws IOException {
+        server.shutdown();
+
+        assertThatThrownBy(() -> client.fetchSpecies("mewtwo"))
+                .isInstanceOf(Exception.class);
     }
 }

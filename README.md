@@ -166,7 +166,7 @@ docker compose up --build
 ## Architecture
 
 The project is small, so it uses a **layered (multi-tier) packaging** strategy — each tier
-is a package under `com.eileanor.pokedex`, with dependencies pointing strictly inward
+is a package under `com.eileanor.funny_pokedex`, with dependencies pointing strictly inward
 (controller → service → client → domain). This keeps responsibilities obvious and makes
 the business logic easy to unit-test in isolation from HTTP and from the upstream APIs.
 
@@ -194,7 +194,7 @@ open to a fully non-blocking stack later. It requires adding `spring-boot-starte
 ```mermaid
 flowchart TD
     Client([Client]) --> GW[Load Balancer / API Gateway in prod<br/>SSL termination · routing · coarse rate limit]
-    GW --> RL[Inbound rate limiter / throttle<br/>Bucket4j<br/>in-memory locally · Redis-backed in prod]
+    GW --> RL[Inbound rate limiter / throttle<br/>Resilience4j @RateLimiter<br/>in-memory · per instance]
     RL --> C[PokemonController]
     C --> S[PokemonService]
     S --> Cache{Cache hit?<br/>Caffeine locally<br/>Redis in prod}
@@ -215,9 +215,9 @@ flowchart TD
     Resp --> Client
 ```
 
-> The LB / API Gateway and the Redis-backed Bucket4j are **production topology**. In local
-> development, there is no gateway and Bucket4j uses an in-memory bucket — the rest of the
-> flow is identical.
+> The LB / API Gateway is **production topology**. In local development, there is no gateway
+> — the rest of the flow is identical. The Resilience4j `@RateLimiter` is in-memory and
+> per-instance in all profiles (see rate-limiting notes below).
 
 The basic `GET /pokemon/{name}` path is the same flow **without** the translation nodes
 (`Rule → Yoda/Shakespeare → FunTranslations → Fallback`): it fetches from PokéAPI, maps,
@@ -317,25 +317,26 @@ all replicas and upstream quota protection is cluster-wide, not per-instance.
 ### Inbound/outbound security — rate limiting & throttling
 
 To protect the service (and, transitively, our limited upstream quota) from abuse or
-runaway clients, we add an inbound **rate limiter** implemented with **Bucket4j** as a
-servlet filter. The inbound limiter uses a per-client-IP key so one misbehaving client exhausts only their own bucket. The outbound FunTranslations limiter uses a single global key shared across all instances, ensuring the entire cluster respects the upstream quota collectively rather than each replica enforcing it independently. Limits (requests/interval, burst size) are **configurable via application
-properties**:
+runaway clients, the two controller endpoints are annotated with Resilience4j's
+**`@RateLimiter(name = "inbound")`**. Excess requests receive a clean `429`. Limits are
+**configurable via application properties**:
 
 ```properties
-app.ratelimit.capacity=20
-app.ratelimit.refill-period=1m
+resilience4j.ratelimiter.instances.inbound.limitForPeriod=20
+resilience4j.ratelimiter.instances.inbound.limitRefreshPeriod=1m
+resilience4j.ratelimiter.instances.inbound.timeoutDuration=0
 ```
 
-**Throttling** smooths bursts (token-bucket refill) so a spike of requests is shaped rather
-than passed straight through to the upstreams. Excess requests get a clean `429`.
+**Current behaviour:** Resilience4j's rate limiter is **in-memory and per-instance**. In a
+single-process deployment (local or single-replica) this is sufficient. In a multi-replica
+production deployment each instance independently enforces the limit, effectively multiplying
+it by the number of replicas.
 
-**Local development:** Bucket4j uses an **in-memory token bucket** — no external
-dependency, but the rate limit is per-instance only.
-
-**Production:** Bucket4j is backed by **Redis** (via the Bucket4j Redis integration) so
-the token-bucket state is shared across all replicas. Without this, each replica would
-independently allow `capacity` requests per period, effectively multiplying the limit by the
-number of replicas — which defeats the purpose in a distributed deployment.
+**Production improvement:** For cluster-wide enforcement, the inbound limiter should be
+replaced with a distributed solution — for example **Bucket4j backed by Redis** — so the
+token-bucket state is shared across all instances and a single coordinated limit applies to
+the cluster as a whole. The outbound FunTranslations circuit breaker already provides a
+complementary layer of quota protection on the upstream side.
 
 ### Outbound resilience — retry + circuit breaker
 
@@ -358,15 +359,12 @@ outage should degrade the service, not take it down entirely.
 | Component | Redis down — behaviour | Trade-off |
 | --------- | ---------------------- | --------- |
 | **Cache** | Fall back to **Caffeine in-memory** per-instance (or bypass cache entirely and serve every request live from upstreams). | Upstream quota is exposed until Redis recovers; per-instance fallback still helps if the outage is partial. |
-| **Bucket4j rate limiter** | **Fail-open**: fall back to a per-instance in-memory bucket. Requests are no longer cluster-wide rate-limited; each replica enforces the limit independently. | Prefer fail-open over fail-closed here — refusing all requests because Redis is down is worse than temporarily loosened limits. However, a partial mitigation (e.g. halved per-instance capacity during fallback) can be configured. |
+| **Rate limiter** | Already in-memory per-instance (Resilience4j). No additional Redis dependency. If migrated to a Redis-backed distributed limiter (e.g. Bucket4j), the fallback would be to revert to per-instance limits — **fail-open** rather than blocking all requests. | Prefer fail-open here — refusing all traffic because Redis is down is worse than temporarily loosened limits. |
 
 Practically this means:
 
 - The `CacheManager` bean is configured with Redis as primary and Caffeine as a fallback
   (or a `try/catch` around cache operations).
-- Bucket4j's distributed setup uses a health-check on the Redis connection; if unavailable,
-  the filter switches to a local fallback bucket and records a Micrometer counter so the
-  fallback is observable.
 - Spring Boot Actuator's `/actuator/health` exposes Redis connectivity as a health
   indicator; the orchestrator (Kubernetes, ECS) can use `/actuator/readiness` to stop
   routing traffic to a replica that has lost its Redis connection, rather than relying on
@@ -424,8 +422,8 @@ shallow coverage.
 ## Project layout
 
 ```
-src/main/java/com/eileanor/pokedex/
-├── PokedexApplication.java
+src/main/java/com/eileanor/funny_pokedex/
+├── FunnyPokedexApplication.java
 ├── controller/
 │   └── PokemonController.java
 ├── service/
@@ -435,10 +433,23 @@ src/main/java/com/eileanor/pokedex/
 │   ├── PokeApiClient.java
 │   └── FunTranslationsClient.java
 ├── domain/
-│   ├── pokeapi/            # upstream PokéAPI models (species, flavor text, habitat)
-│   ├── funtranslations/    # upstream FunTranslations models
-│   └── PokemonResponse.java   # the DTO we return
-├── config/                 # WebClient, cache, rate-limiter, Resilience4j beans
+│   ├── pokeapi/                        # upstream PokéAPI models
+│   │   ├── PokemonSpeciesResponse.java
+│   │   ├── FlavorTextEntry.java
+│   │   └── NamedResource.java
+│   ├── funtranslations/                # upstream FunTranslations models
+│   │   ├── FunTranslationRequest.java
+│   │   ├── FunTranslationResponse.java
+│   │   ├── TranslationContents.java
+│   │   └── TranslationSuccess.java
+│   └── PokemonResponse.java            # the DTO we return
+├── config/
+│   ├── WebClientConfig.java            # WebClient beans (one per upstream)
+│   ├── CacheConfig.java                # Caffeine / Redis CacheManager
+│   ├── CacheProperties.java            # app.cache.* properties
+│   ├── PokeApiProperties.java          # app.pokeapi.* properties
+│   ├── FunTranslationsProperties.java  # app.funtranslations.* properties
+│   └── RateLimitProperties.java        # app.ratelimit.* properties
 └── error/
     ├── PokemonNotFoundException.java
     ├── RateLimitExceededException.java
@@ -455,7 +466,7 @@ src/main/java/com/eileanor/pokedex/
 | Framework        | Spring Boot 4.1 (Spring MVC) |
 | HTTP client      | Spring `WebClient` (`spring-webflux`) |
 | Caching          | Spring Cache — **Caffeine** (local) / **Redis** (production) |
-| Inbound limiting | Bucket4j — in-memory bucket (local) / **Redis-backed** (production) |
+| Inbound limiting | Resilience4j `@RateLimiter` — in-memory, per-instance (both profiles) |
 | Outbound resilience | Resilience4j (retry + circuit breaker + timeout) |
 | Observability    | Micrometer + Prometheus + Grafana, Spring Actuator |
 | Build            | Maven (`./mvnw` wrapper) |
