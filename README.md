@@ -19,6 +19,7 @@ degradation* as first-class concerns rather than afterthoughts.
 
 - [API reference](#api-reference)
 - [How to run it](#how-to-run-it)
+- [Kubernetes](#kubernetes)
 - [Architecture](#architecture)
 - [Request flow](#request-flow)
 - [Domain mapping](#domain-mapping)
@@ -131,28 +132,26 @@ docker run -p 5000:5000 funny-pokedex
 
 ### Run with Docker Compose (app + Redis)
 
-For the distributed setup, a `docker-compose.yml` brings up the app together with Redis:
+For the distributed setup, a `docker-compose.yml` brings up the app together with Redis.
+All configuration is driven by environment variables — `.env.example` (committed) is loaded
+as the baseline and an optional `.env` (gitignored) is layered on top for local overrides.
 
-```yaml
-services:
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-  app:
-    build: .
-    ports:
-      - "5000:5000"
-    environment:
-      - SPRING_PROFILES_ACTIVE=prod
-      - SPRING_DATA_REDIS_HOST=redis
-    depends_on:
-      - redis
-```
+To use the defaults as-is:
 
 ```bash
 docker compose up --build
 ```
+
+To override a value (e.g. change the cache name or TTL):
+
+```bash
+cp .env.example .env
+# edit .env — only the keys you want to change
+docker compose up --build
+```
+
+Every variable the app reads is listed in `.env.example` with its default value and a short
+comment. No rebuild is needed for configuration changes — just update `.env` and restart.
 
 ### Run the tests
 
@@ -160,6 +159,23 @@ docker compose up --build
 ./mvnw test      # unit tests (fast, no external dependencies)
 ./mvnw verify    # unit + integration tests (Redis via Testcontainers — needs Docker)
 ```
+
+---
+
+## Kubernetes
+
+The `k8s/` directory contains a minimal cluster setup to run the app and Redis on Kubernetes:
+
+| File | Kind | Purpose |
+| ---- | ---- | ------- |
+| `k8s/configmap.yaml` | `ConfigMap` | All application environment variables as flat key-value pairs. Mounted via `envFrom` — edit this file to tune any setting without rebuilding the image. |
+| `k8s/deployment.yaml` | `Deployment` | Single-replica `funny-pokedex` pod. Pulls `funny-pokedex:latest`, exposes port `5000`, and loads all env vars from the ConfigMap above via `envFrom: configMapRef`. |
+| `k8s/service.yaml` | `Service` (ClusterIP) | Internal DNS entry `funny-pokedex:5000` so other workloads in the cluster can reach the app. |
+| `k8s/redis.yaml` | `Deployment` + `Service` | Redis `7-alpine` pod with CPU/memory limits, liveness/readiness TCP probes, and a ClusterIP service named `redis` — the hostname the app resolves via `SPRING_DATA_REDIS_HOST`. |
+
+> This is an illustrative local setup. A production cluster would add Ingress / TLS,
+> resource requests on the app pod, a `HorizontalPodAutoscaler`, and external Redis
+> (e.g. ElastiCache or Redis Cloud) rather than an in-cluster pod.
 
 ---
 
@@ -206,9 +222,12 @@ flowchart TD
     Rule -- no --> Shake[Shakespeare translation]
     Yoda --> FT[FunTranslationsClient · WebClient<br/>retry + circuit breaker]
     Shake --> FT
-    FT --> FunAPI[(FunTranslations API)]
+    FT --> Gate{retry_after cooldown<br/>active?<br/>InMemory locally<br/>Redis in prod}
+    Gate -- yes → skip call --> Fallback[Use standard description]
+    Gate -- no --> FunAPI[(FunTranslations API)]
     FunAPI -- success --> Map[Map to PokemonResponse]
-    FunAPI -- error / 429 / no translation --> Fallback[Use standard description]
+    FunAPI -- 429 → set cooldown --> Fallback
+    FunAPI -- error / no translation --> Fallback
     Fallback --> Map
     Map --> Store[Store in cache · TTL]
     Store --> Resp
@@ -303,10 +322,11 @@ and handles:
   and supports blue/green or canary deployments without downtime.
 - **Coarse-grained rate limiting** — high-volume DDoS traffic is dropped at the gateway
   before it reaches application threads. This is complementary to (not a replacement for)
-  the app-level Bucket4j rate limiter, which enforces finer-grained per-client limits.
+  the app-level rate limiter, which enforces finer-grained per-client limits.
 
-The app-level Bucket4j layer (see next subsection) handles nuanced per-key limits and
-request throttling that the gateway's simpler per-IP limits cannot express.
+**Production improvement:** the current `@RateLimiter` is in-memory and per-instance. For
+cluster-wide enforcement, it could be replaced with **Bucket4j backed by Redis** so the
+token-bucket state is shared across all replicas — but this is not implemented here.
 
 ### Distributed cache — Redis
 
@@ -314,7 +334,7 @@ See [Caching strategy → Production — Redis](#production--redis). In short: i
 Caffeine is used locally; **Redis** is used in production so the cache is shared across
 all replicas and upstream quota protection is cluster-wide, not per-instance.
 
-### Inbound/outbound security — rate limiting & throttling
+### Inbound/outbound security — rate limiting
 
 To protect the service (and, transitively, our limited upstream quota) from abuse or
 runaway clients, the two controller endpoints are annotated with Resilience4j's
@@ -335,7 +355,7 @@ it by the number of replicas.
 **Production improvement:** For cluster-wide enforcement, the inbound limiter should be
 replaced with a distributed solution — for example **Bucket4j backed by Redis** — so the
 token-bucket state is shared across all instances and a single coordinated limit applies to
-the cluster as a whole. The outbound FunTranslations circuit breaker already provides a
+the cluster as a whole. It could also implement request throttling to better ensure stability. The outbound FunTranslations circuit breaker already provides a
 complementary layer of quota protection on the upstream side.
 
 ### Outbound resilience — retry + circuit breaker
@@ -348,8 +368,42 @@ The upstream APIs fail and rate-limit us, so the client layer wraps each call wi
 - **Circuit breaker** that opens when the **outbound rate limit / upstream `429`s** start
   hitting, failing fast instead of hammering a service that's already refusing us. While
   the breaker is open, the translated endpoint degrades gracefully to the standard
-  description (rule 3), so callers still get a valid response.
+  description (rule 3), so callers still get a valid response. `429` responses are
+  explicitly excluded from the circuit-breaker failure-rate calculation — they are expected
+  quota signals, not faults.
 - **Timeouts + bulkhead** to cap how many threads/connections a slow upstream can tie up.
+
+### FunTranslations `retry_after` cooldown gate
+
+When FunTranslations returns a `429 Too Many Requests` the response body includes a
+`retry_after` field (seconds) indicating when the quota resets:
+
+```json
+{
+  "error": { "code": 429, "message": "Too many requests…" },
+  "retry_after": 42
+}
+```
+
+`FunTranslationsClient` extracts this value and engages a **cooldown gate**: for the
+duration of `retry_after`, further translation calls return `Optional.empty()` immediately
+without hitting the upstream at all. This is complementary to the circuit breaker, which
+only opens after several failures have accumulated — the gate reacts on the **first** `429`
+and honors the server's **exact** window rather than a static guess.
+
+The gate is backed by a `RateLimitCooldown` interface with two implementations, selected
+by profile:
+
+| Profile | Implementation | Scope |
+| ------- | -------------- | ----- |
+| `local` | `InMemoryRateLimitCooldown` — `volatile Instant` field | per-instance |
+| `prod` | `RedisRateLimitCooldown` — Redis key `funtranslations:rate-limited` with TTL | **cluster-wide** |
+
+In production, the Redis key is written with `SET … EX {retry_after}` so it expires
+automatically when the window closes. All replicas share the same key, meaning the
+first replica to receive a `429` suppresses calls across the entire cluster for the
+exact duration the upstream requested. If Redis is unreachable the gate **fails open**
+(logs a warning and allows the call through) so a Redis outage does not block translations.
 
 ### Redis availability — error handling
 

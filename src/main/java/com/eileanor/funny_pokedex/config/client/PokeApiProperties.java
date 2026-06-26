@@ -1,4 +1,4 @@
-package com.eileanor.funny_pokedex.config;
+package com.eileanor.funny_pokedex.config.client;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 

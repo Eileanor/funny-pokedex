@@ -3,31 +3,37 @@ kind: ConfigMap
 metadata:
   name: funny-pokedex-config
 data:
-  application-prod.properties: |
-    # External application properties provided by ConfigMap.
-    # These values override the packaged defaults when the prod profile is active.
-    server.port=5000
-    logging.level.root=INFO
-    app.pokeapi.base-url=https://pokeapi.co/api/v2
-    app.funtranslations.base-url=https://api.funtranslations.mercxry.me/v1/translate
-    app.funtranslations.shakespeare-path=/shakespeare
-    app.funtranslations.yoda-path=/yoda
-    app.cache.cache-names=pokemon,pokemon-translated
-    app.cache.ttl=24h
-    spring.data.redis.host=redis
-    spring.data.redis.port=6379
-    # Example resilience settings; can be tuned without rebuilding.
-    resilience4j.retry.instances.pokeApi.maxAttempts=3
-    resilience4j.retry.instances.pokeApi.waitDuration=500ms
-    resilience4j.retry.instances.pokeApi.ignoreExceptions[0]=com.eileanor.funny_pokedex.error.PokemonNotFoundException
-    resilience4j.circuitbreaker.instances.pokeApi.slidingWindowSize=10
-    resilience4j.circuitbreaker.instances.pokeApi.failureRateThreshold=50
-    resilience4j.circuitbreaker.instances.pokeApi.waitDurationInOpenState=30s
-    resilience4j.circuitbreaker.instances.pokeApi.registerHealthIndicator=true
-    resilience4j.retry.instances.funTranslations.maxAttempts=2
-    resilience4j.retry.instances.funTranslations.waitDuration=500ms
-    resilience4j.retry.instances.funTranslations.ignoreExceptions[0]=org.springframework.web.reactive.function.client.WebClientResponseException$TooManyRequests
-    resilience4j.circuitbreaker.instances.funTranslations.slidingWindowSize=10
-    resilience4j.circuitbreaker.instances.funTranslations.failureRateThreshold=50
-    resilience4j.circuitbreaker.instances.funTranslations.waitDurationInOpenState=60s
-    management.endpoint.health.probes.enabled=true
+  SERVER_PORT: "5000"
+  SPRING_PROFILES_ACTIVE: prod
+  LOG_LEVEL: INFO
+
+  SPRING_DATA_REDIS_HOST: redis
+  SPRING_DATA_REDIS_PORT: "6379"
+  REDIS_TIMEOUT: 5s
+
+  POKEAPI_BASE_URL: https://pokeapi.co/api/v2
+  FUNTRANSLATIONS_BASE_URL: https://api.funtranslations.mercxry.me/v1/translate
+  FUNTRANSLATIONS_SHAKESPEARE_PATH: /shakespeare
+  FUNTRANSLATIONS_YODA_PATH: /yoda
+
+  CACHE_TTL: 24h
+  CACHE_NAME_POKEMON: pokemon
+  CACHE_NAME_POKEMON_TRANSLATED: pokemon-translated
+
+  RATE_LIMIT_FOR_PERIOD: "20"
+  RATE_LIMIT_REFRESH_PERIOD: 1m
+  RATE_LIMIT_TIMEOUT: "0"
+
+  POKEAPI_RETRY_MAX_ATTEMPTS: "3"
+  POKEAPI_RETRY_WAIT: 500ms
+  POKEAPI_CB_SLIDING_WINDOW_SIZE: "10"
+  POKEAPI_CB_FAILURE_RATE_THRESHOLD: "50"
+  POKEAPI_CB_WAIT_OPEN: 30s
+
+  FUNTRANSLATIONS_RETRY_MAX_ATTEMPTS: "3"
+  FUNTRANSLATIONS_RETRY_WAIT: 500ms
+  FUNTRANSLATIONS_CB_SLIDING_WINDOW_SIZE: "10"
+  FUNTRANSLATIONS_CB_FAILURE_RATE_THRESHOLD: "50"
+  FUNTRANSLATIONS_CB_WAIT_OPEN: 60s
+
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"

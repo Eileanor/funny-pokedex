@@ -4,12 +4,14 @@ import com.eileanor.funny_pokedex.client.FunTranslationsClient;
 import com.eileanor.funny_pokedex.client.PokeApiClient;
 import com.eileanor.funny_pokedex.domain.PokemonResponse;
 import com.eileanor.funny_pokedex.domain.pokeapi.PokemonSpeciesResponse;
+import org.springframework.cache.annotation.CacheConfig;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
 
 @Service
+@CacheConfig(cacheResolver = "pokemonCacheResolver")
 class PokemonServiceImpl implements PokemonService {
 
     private final PokeApiClient pokeApiClient;
@@ -21,7 +23,7 @@ class PokemonServiceImpl implements PokemonService {
     }
 
     @Override
-    @Cacheable(value = "pokemon", key = "#name")
+    @Cacheable(key = "#name")
     public PokemonResponse getPokemon(String name) {
         PokemonSpeciesResponse species = pokeApiClient.fetchSpecies(name);
         String description = extractEnglishDescription(species);
@@ -30,7 +32,7 @@ class PokemonServiceImpl implements PokemonService {
     }
 
     @Override
-    @Cacheable(value = "pokemon-translated", key = "#name")
+    @Cacheable(key = "#name")
     public PokemonResponse getTranslatedPokemon(String name) {
         PokemonSpeciesResponse species = pokeApiClient.fetchSpecies(name);
         String standard = extractEnglishDescription(species);

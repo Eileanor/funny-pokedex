@@ -4,8 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 import java.time.Duration;
-import java.util.List;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -13,6 +11,8 @@ import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.serializer.RedisSerializer;
 
+import com.eileanor.funny_pokedex.config.cache.CacheConfig;
+import com.eileanor.funny_pokedex.config.cache.CacheProperties;
 import com.eileanor.funny_pokedex.domain.PokemonResponse;
 
 import tools.jackson.databind.ObjectMapper;
@@ -79,7 +79,8 @@ class CacheConfigTest {
     @Test
     @DisplayName("redisCacheManager configures TTL and cache names")
     void redisCacheManager_configuresTtlAndCacheNames() {
-        var cacheProperties = new CacheProperties(Duration.ofMinutes(30), List.of("pokemon", "pokemon-translated"));
+        var cacheProperties = new CacheProperties(Duration.ofMinutes(30),
+                new CacheProperties.CacheName("pokemon", "pokemon-translated"));
         var cacheConfig = new CacheConfig(cacheProperties);
         var connectionFactory = mock(RedisConnectionFactory.class);
 

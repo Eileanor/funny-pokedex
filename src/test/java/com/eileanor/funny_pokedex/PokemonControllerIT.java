@@ -22,6 +22,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.cache.CacheManager;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -33,7 +34,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.eileanor.funny_pokedex.client.FunTranslationsClient;
 import com.eileanor.funny_pokedex.client.PokeApiClient;
-import com.eileanor.funny_pokedex.config.FunTranslationsProperties;
+import com.eileanor.funny_pokedex.config.client.FunTranslationsProperties;
+import com.eileanor.funny_pokedex.config.rate_limit.RateLimitCooldown;
 import com.eileanor.funny_pokedex.domain.PokemonResponse;
 import com.eileanor.funny_pokedex.domain.pokeapi.FlavorTextEntry;
 import com.eileanor.funny_pokedex.domain.pokeapi.NamedResource;
@@ -74,6 +76,10 @@ class PokemonControllerIT {
     RedisConnectionFactory redisConnectionFactory;
     @Autowired
     FunTranslationsProperties properties;
+    @Autowired
+    RateLimitCooldown rateLimitCooldown;
+    @Autowired
+    StringRedisTemplate stringRedisTemplate;
 
     private static final String POKEMON_NAME = "mewtwo";
     private static final String STANDARD_DESC = "It was created by a scientist after years of horrific gene splicing.";
@@ -272,6 +278,27 @@ class PokemonControllerIT {
 
         // then — zero upstream calls despite 5 requests
         verifyNoInteractions(pokeApiClient, funTranslationsClient);
+    }
+
+    @Test
+    @DisplayName("RedisRateLimitCooldown is not rate-limited by default")
+    void rateLimitCooldown_notRateLimitedByDefault() {
+        assertThat(rateLimitCooldown.isRateLimited()).isFalse();
+    }
+
+    @Test
+    @DisplayName("RedisRateLimitCooldown reports rate-limited after setRateLimitedFor")
+    void rateLimitCooldown_isRateLimitedAfterSet() {
+        rateLimitCooldown.setRateLimitedFor(60);
+        assertThat(rateLimitCooldown.isRateLimited()).isTrue();
+    }
+
+    @Test
+    @DisplayName("RedisRateLimitCooldown stores the key with a TTL in Redis")
+    void rateLimitCooldown_keyHasTtlInRedis() {
+        rateLimitCooldown.setRateLimitedFor(30);
+        Long ttl = stringRedisTemplate.getExpire("funtranslations:rate-limited");
+        assertThat(ttl).isPositive();
     }
 
     private PokemonSpeciesResponse mewtwoSpecies() {

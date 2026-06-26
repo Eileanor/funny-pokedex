@@ -1,4 +1,4 @@
-package com.eileanor.funny_pokedex.config;
+package com.eileanor.funny_pokedex.config.cache;
 
 import java.time.Duration;
 import java.util.List;
@@ -40,7 +40,7 @@ public class CacheConfig {
     public CacheManager caffeineCacheManager() {
         CaffeineCacheManager manager = new CaffeineCacheManager();
         manager.setCacheNames(CACHE_NAMES);
-        manager.setCaffeine(Caffeine.newBuilder().expireAfterWrite(ttl));
+        manager.setCaffeine(Caffeine.newBuilder().expireAfterWrite(ttl).recordStats());
         return manager;
     }
 
@@ -66,7 +66,7 @@ public class CacheConfig {
     // Serialize PokemonResponse directly to/from JSON by type — avoids the @class /
     // PolymorphicTypeValidator round-trip that causes LinkedHashMap casts in
     // Jackson 3.x.
-    static RedisSerializer<Object> pokemonResponseSerializer(ObjectMapper objectMapper) {
+    public static RedisSerializer<Object> pokemonResponseSerializer(ObjectMapper objectMapper) {
         return new RedisSerializer<Object>() {
             @Override
             public byte[] serialize(Object value) {

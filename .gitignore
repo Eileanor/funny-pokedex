@@ -32,6 +32,9 @@ build/
 ### VS Code ###
 .vscode/
 
+### Env vars ###
+.env
+
 ### Other resources ###
 *.txt
 .DS_Store

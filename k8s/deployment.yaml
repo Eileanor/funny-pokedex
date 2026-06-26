@@ -17,17 +17,6 @@ spec:
           image: funny-pokedex:latest
           ports:
             - containerPort: 5000
-          env:
-            - name: SPRING_PROFILES_ACTIVE
-              value: prod
-          volumeMounts:
-            - name: config-volume
-              mountPath: /config
-          command: ["java", "-jar", "app.jar", "--spring.config.additional-location=file:/config/application-prod.properties"]
-      volumes:
-        - name: config-volume
-          configMap:
-            name: funny-pokedex-config
-            items:
-              - key: application-prod.properties
-                path: application-prod.properties
+          envFrom:
+            - configMapRef:
+                name: funny-pokedex-config

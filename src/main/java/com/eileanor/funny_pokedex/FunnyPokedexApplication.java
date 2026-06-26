@@ -4,10 +4,10 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
-import com.eileanor.funny_pokedex.config.CacheProperties;
-import com.eileanor.funny_pokedex.config.FunTranslationsProperties;
-import com.eileanor.funny_pokedex.config.PokeApiProperties;
-import com.eileanor.funny_pokedex.config.RateLimitProperties;
+import com.eileanor.funny_pokedex.config.rate_limit.RateLimitProperties;
+import com.eileanor.funny_pokedex.config.cache.CacheProperties;
+import com.eileanor.funny_pokedex.config.client.FunTranslationsProperties;
+import com.eileanor.funny_pokedex.config.client.PokeApiProperties;
 
 @SpringBootApplication
 @EnableConfigurationProperties({
